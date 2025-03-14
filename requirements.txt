@@ -1,0 +1,8 @@
+python==3.9.21
+torch
+scikit-learn
+gym==0.26.2
+tqdm
+numpy
+
+

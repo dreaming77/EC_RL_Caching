@@ -1,0 +1,40 @@
+#数据预处理配置
+path:
+  raw_path: "../data/MovieLens_1M"
+  processed_path: "../data/processed"
+  models_path: "../outputs/models"
+
+#数据特征处理配置
+features:
+  movie_embedding_dim: 32
+  time_features: True
+  normalize: True
+
+# 环境配置
+environment:
+  num_edges: 3
+  cache_capacity: 100
+  delay_weights:
+    local: 1.0    # 本地延迟（单位：ms）
+    edge: 10.0    # 邻近边缘延迟
+    cloud: 100.0  # 云中心延迟
+  state_dim: 65   # 状态维度
+
+# 智能体配置
+agent:
+  lr: 0.001
+  gamma: 0.99
+  epsilon_max: 1.0
+  epsilon_min: 0.01
+  epsilon_decay: 0.995
+  batch_size: 64
+  replay_size: 10000
+
+# 训练配置
+training:
+  num_episodes: 1000
+  target_update: 50
+  save_interval: 100
+  log_dir: "../outputs/logs"
+
+
