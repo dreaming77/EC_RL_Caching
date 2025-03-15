@@ -26,14 +26,14 @@ def preprocess_requests():
         缓存容量：动态模拟缓存剩余槽位比例
     """
     config = load_config()
-    raw_path = Path(config['path']['raw_path'])
+    raw_path = Path(config['data']['raw_path'])
 
     # 加载原始数据
     ratings = pd.read_csv(
         raw_path / 'ratings.dat',
         sep='::',
         names=['user_id', 'movie_id', 'rating', 'timestamp',],
-        engine = 'python'
+        engine='python'
     )
 
     # 按时间戳排序生成请求序列
@@ -70,7 +70,7 @@ def preprocess_requests():
     ratings_sorted['cache_remaining'] = cache_remaining_list
 
     # 保存预处理数据
-    processed_path = Path(config['path']['processed_path'])
+    processed_path = Path(config['data']['processed_path'])
     processed_path.mkdir(parents=True, exist_ok=True)
     ratings_sorted.to_parquet(processed_path / 'processed_requests.parquet')
 
@@ -84,7 +84,7 @@ if __name__ == '__main__':
     #
     # # Step 2: 加载预处理后的数据
     # import pandas as pd
-    # processed_df = pd.read_parquet('../path/processed/processed_requests.parquet')
+    # processed_df = pd.read_parquet('../data/processed/processed_requests.parquet')
     #
     # # Step 3: 特征工程
     # engineer = FeatureEngineer()

@@ -3,7 +3,7 @@
 """
 Author: DreamingWay
 Date: 2025/3/13
-Description:If using codes, please indicate the source. 
+Description:If using codes, please indicate the source.
 """
 
 import torch
@@ -13,10 +13,10 @@ import yaml
 from pathlib import Path
 
 def load_config():
-    with open("configs/default.yaml") as f:
+    with open("../configs/default.yaml") as f:
         return yaml.safe_load(f)
 
-class FeatureEngineer:
+class MovieLensFeatureEngineer:
     """
     电影ID连续编码：
         使用LabelEncoder将原始movie_id转换为连续整数，解决ID不连续问题
@@ -47,7 +47,7 @@ class FeatureEngineer:
     def fit_transform(self, df):
         """在训练集上拟合特征工程参数"""
         # 验证输入数据完整性
-        required_columns = ['movie_id', 'timestamp', 'popularity', 'cache_remaining']
+        required_columns = ['movie_id', 'edge_id', 'timestamp', 'popularity', 'cache_remaining']
         assert all(col in df.columns for col in required_columns), "Missing required columns"
 
         # === 电影ID嵌入 ===
@@ -83,15 +83,13 @@ class FeatureEngineer:
             self.cache_scaler.fit_transform(df[['cache_remaining']])
         )
 
-        # === 特征拼接 ===
-        features = torch.cat([
-            movie_features,     # 电影嵌入 (32维)
-            time_features,       # 时间特征 (24h + 7d = 31维)
-            popularity_norm,    # 流行度 (1维)
-            cache_norm          # 缓存容量 (1维)
-        ], dim=1)
+        df['movie_features'] = movie_features.tolist()
+        df['time_features'] = time_features.tolist()
+        df['popularity_norm'] = popularity_norm
+        df['cache_norm'] = cache_norm
 
-        return features
+        # 返回特征向量和原始数据（或保存到不同文件）
+        return df[['movie_id', 'edge_id', 'movie_features', 'time_features', 'popularity_norm', 'cache_norm']]
 
     def transform(self, df):
         """在测试集/新数据上应用特征转换"""
@@ -121,13 +119,17 @@ class FeatureEngineer:
             self.cache_scaler.transform(df[['cache_remaining']])
         )
 
-        # === 特征拼接 ===
-        return torch.cat([
-            movie_features,
-            time_features,
-            popularity_norm,
-            cache_norm
-        ], dim=1)
+        df['movie_features'] = movie_features.tolist()
+        df['time_features'] = time_features.tolist()
+        df['popularity_norm'] = popularity_norm
+        df['cache_norm'] = cache_norm
+
+        # 返回特征向量和原始数据（或保存到不同文件）
+        return df[['movie_id', 'edge_id', 'movie_features', 'time_features', 'popularity_norm', 'cache_norm']]
+
+    # 或者将元数据与特征分开保存
+    def save_features(self, features, metadata, path):
+        torch.save({'features': features, 'metadata': metadata}, path)
 
 
 if __name__ == '__main__':
@@ -138,14 +140,14 @@ if __name__ == '__main__':
 
 
     config = load_config()
-    processed_path = Path(config['path']['processed_path'])
-    models_path = Path(config['path']['models_path'])
+    processed_path = Path(config['data']['processed_path'])
+    models_path = Path(config['data']['models_path'])
 
     # 加载预处理后的数据
     df = pd.read_parquet(processed_path / 'processed_requests.parquet')
 
     # 初始化特征工程器
-    engineer = FeatureEngineer()
+    engineer = MovieLensFeatureEngineer()
 
     # 训练集特征转换
     train_features = engineer.fit_transform(df)
@@ -504,6 +506,6 @@ if __name__ == '__main__':
     
     - **归一化参数保存**：确保在部署模型时，保存并加载`popularity_scaler`和`cache_scaler`的归一化参数，以保持一致性。
     
-    通过以上修改，`features.py`能够正确处理预处理后的数据，生成符合要求的特征向量，并与模型训练流程无缝集成。
+    通过以上修改，`feature_engineers.py`能够正确处理预处理后的数据，生成符合要求的特征向量，并与模型训练流程无缝集成。
     
 """

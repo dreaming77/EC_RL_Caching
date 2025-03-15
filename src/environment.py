@@ -16,25 +16,30 @@ from .utils.cache_simulator import MultiEdgeCacheManager
 
 
 class EdgeCachingEnv(gym.Env):
-    def __init__(self, requests: np.ndarray, num_edges: int = 3, cache_size=100, config_path: str = "../configs/default.yaml"):
+    def __init__(self, requests: np.ndarray, config: dict):
         super().__init__()
 
         # 加载配置
-        self.config = self._load_config(config_path)
-        self.num_edges = num_edges
-        self.cache_manager = MultiEdgeCacheManager(num_edges, cache_size)
+        self.config = config
+        self.num_edges = config["environment"]["num_edges"]
+        self.cache_capacity = config["environment"]["cache_capacity"]
+        self.cache_manager = MultiEdgeCacheManager(self.num_edges, self.cache_capacity)
         self.requests = requests  # 预处理后的请求序列
 
         # 定义动作空间：0-本地缓存，1-邻近边缘，2-云中心
         self.action_space = spaces.Discrete(3)
 
         # 状态空间维度：[流行度, 缓存剩余容量, 时间特征...]
-        self.observation_space = spaces.Box(low=0, high=1, shape=(self.config["state_dim"],))
+        self.observation_space = spaces.Box(
+            low=0, high=1,
+            shape=(self.config["environment"]["state_dim"],),
+            dtype=np.float32
+        )
 
         # 初始化参数
         self.current_step = 0
-        self.delay_weights = self.config["delay_weights"]  # 各层延迟权重
-        self.cache_capacity = self.config["cache_capacity"]
+        self.delay_weights = self.config["environment"]["delay_weights"]  # 各层延迟权重
+        self.cache_capacity = self.config["environment"]["cache_capacity"]
 
         # 初始化边缘服务器缓存（使用LRU策略）
         self.edge_caches: Dict[int, deque] = {
@@ -53,14 +58,16 @@ class EdgeCachingEnv(gym.Env):
             self.edge_caches[edge_id].clear()
         return self._get_state()
 
+    # environment.py
     def _get_state(self) -> np.ndarray:
-        """获取当前状态"""
+        """确保字段名称与预处理数据完全一致"""
         current_request = self.requests[self.current_step]
+
         return np.concatenate([
-            current_request["popularity_norm"],  # 归一化流行度
-            current_request["cache_remaining"],  # 缓存剩余容量
-            current_request["time_features"]  # 时间特征
-        ])
+            [current_request["popularity_norm"]],  # 电影流行度（需归一化）
+            [current_request["cache_norm"]],  # 缓存剩余容量（0-1）
+            current_request["time_features"]  # 时间特征（one-hot向量）
+        ]).astype(np.float32)
 
     def _calculate_delay(self, action: int, user_edge: int, movie_id: int) -> float:
         """根据动作计算延迟"""
@@ -88,27 +95,30 @@ class EdgeCachingEnv(gym.Env):
         self.edge_caches[edge_id].appendleft(movie_id)
 
     def step(self, action: int):
-        # 获取当前请求信息
         current_request = self.requests[self.current_step]
-        user_edge = current_request["user_edge"]  # 用户所属边缘服务器
+        user_edge = current_request["edge_id"]  # 使用预处理字段名
         movie_id = current_request["movie_id"]
 
         # 计算延迟
         delay = self._calculate_delay(action, user_edge, movie_id)
 
-        # 检查本地缓存
-        local_hit = self.cache_manager.check_cache(user_edge, movie_id)
+        # === 根据动作执行缓存更新 ===
+        if action == 0:  # 本地缓存动作
+            # 如果缓存未命中且容量未满，则添加内容
+            if not self.cache_manager.check_cache(user_edge, movie_id):
+                if len(self.cache_manager.caches[user_edge].cache_queue) < self.cache_capacity:
+                    self.cache_manager.update_cache(user_edge, movie_id)
 
-        # 根据动作执行逻辑
-        if action == 0 and local_hit:  # 本地命中...
-            pass
-        elif action == 1:
-            # 查询其他边缘服务器...
+        elif action == 1:  # 邻近边缘查询
+            # 仅在邻近命中时更新本地缓存（可选策略）
+            found = False
             for edge_id in self.cache_manager.caches:
-                if edge_id != user_edge:
-                    if self.cache_manager.check_cache(edge_id, movie_id):
-                        # 邻近边缘命中...
-                        break
+                if edge_id != user_edge and self.cache_manager.check_cache(edge_id, movie_id):
+                    found = True
+                    break
+            if found and len(self.cache_manager.caches[user_edge].cache_queue) < self.cache_capacity:
+                self.cache_manager.update_cache(user_edge, movie_id)
+
         else:  # 请求云中心...
             pass
 
@@ -116,12 +126,13 @@ class EdgeCachingEnv(gym.Env):
         if action in [0, 1] and len(self.edge_caches[user_edge]) < self.cache_capacity:
             self.cache_manager.update_cache(user_edge, movie_id)
 
-        # 计算奖励（负延迟）
-        reward = -delay
-
-        # 状态转移
-        self.current_step += 1
+        # === 返回完整信息 ===
+        next_state = self._get_state()
+        reward = -delay  # 奖励为负延迟
         done = self.current_step >= len(self.requests) - 1
+        info = {"delay": delay, "cache_hit": (action == 0)}  # 记录附加信息
 
-        return self._get_state(), reward, done, {"delay": delay}
+        self.current_step += 1  # 必须在返回前递增步骤
+
+        return next_state, reward, done, info
 
